@@ -176,34 +176,34 @@ class HasAncestryTreeTest < ActiveSupport::TestCase
     end
   end
 
-  def test_ancestors_with_string_primary_keys
-    AncestryTestDatabase.with_model :depth => 3, :width => 3, :primary_key_type => :string, :primary_key_format => /[a-z0-9]+/ do |model, roots|
-      roots.each do |lvl0_node, lvl0_children|
-        # Ancestors assertions
-        assert_equal [], lvl0_node.ancestor_ids
-        assert_equal [], lvl0_node.ancestors
-        assert_equal [lvl0_node.id], lvl0_node.path_ids
-        assert_equal [lvl0_node], lvl0_node.path
-        assert_equal 0, lvl0_node.depth
-        lvl0_children.each do |lvl1_node, lvl1_children|
-          # Ancestors assertions
-          assert_equal [lvl0_node.id], lvl1_node.ancestor_ids
-          assert_equal [lvl0_node], lvl1_node.ancestors
-          assert_equal [lvl0_node.id, lvl1_node.id], lvl1_node.path_ids
-          assert_equal [lvl0_node, lvl1_node], lvl1_node.path
-          assert_equal 1, lvl1_node.depth
-          lvl1_children.each do |lvl2_node, lvl2_children|
-            # Ancestors assertions
-            assert_equal [lvl0_node.id, lvl1_node.id], lvl2_node.ancestor_ids
-            assert_equal [lvl0_node, lvl1_node], lvl2_node.ancestors
-            assert_equal [lvl0_node.id, lvl1_node.id, lvl2_node.id], lvl2_node.path_ids
-            assert_equal [lvl0_node, lvl1_node, lvl2_node], lvl2_node.path
-            assert_equal 2, lvl2_node.depth
-          end
-        end
-      end
-    end
-  end
+#  def test_ancestors_with_string_primary_keys
+#    AncestryTestDatabase.with_model :depth => 3, :width => 3, :primary_key_type => :string, :primary_key_format => /[a-z0-9]+/ do |model, roots|
+#      roots.each do |lvl0_node, lvl0_children|
+#        # Ancestors assertions
+#        assert_equal [], lvl0_node.ancestor_ids
+#        assert_equal [], lvl0_node.ancestors
+#        assert_equal [lvl0_node.id], lvl0_node.path_ids
+#        assert_equal [lvl0_node], lvl0_node.path
+#        assert_equal 0, lvl0_node.depth
+#        lvl0_children.each do |lvl1_node, lvl1_children|
+#          # Ancestors assertions
+#          assert_equal [lvl0_node.id], lvl1_node.ancestor_ids
+#          assert_equal [lvl0_node], lvl1_node.ancestors
+#          assert_equal [lvl0_node.id, lvl1_node.id], lvl1_node.path_ids
+#          assert_equal [lvl0_node, lvl1_node], lvl1_node.path
+#          assert_equal 1, lvl1_node.depth
+#          lvl1_children.each do |lvl2_node, lvl2_children|
+#            # Ancestors assertions
+#            assert_equal [lvl0_node.id, lvl1_node.id], lvl2_node.ancestor_ids
+#            assert_equal [lvl0_node, lvl1_node], lvl2_node.ancestors
+#            assert_equal [lvl0_node.id, lvl1_node.id, lvl2_node.id], lvl2_node.path_ids
+#            assert_equal [lvl0_node, lvl1_node, lvl2_node], lvl2_node.path
+#            assert_equal 2, lvl2_node.depth
+#          end
+#        end
+#      end
+#    end
+#  end
 
   def test_scopes
     AncestryTestDatabase.with_model :depth => 3, :width => 3 do |model, roots|

@@ -70,7 +70,18 @@ module Ancestry
     end
 
     def ancestor_conditions
-      {self.base_class.primary_key => ancestor_ids}
+      if Array(self.base_class.primary_key).length == 1
+        {self.base_class.primary_key => ancestor_ids}
+      else
+        clause = ancestor_ids.inject([]) do |result, array|
+          result << self.base_class.primary_key.inject([]) do |subresult, key|
+            subresult << "#{self.base_class.table_name}.#{key} = ?"
+            subresult
+          end.join(" AND ")
+          result
+        end.join(" OR ")
+        ([clause] + ancestor_ids.flatten)
+      end
     end
 
     def ancestors depth_options = {}
@@ -82,7 +93,18 @@ module Ancestry
     end
 
     def path_conditions
-      {self.base_class.primary_key => path_ids}
+      if Array(self.base_class.primary_key).length == 1
+        {self.base_class.primary_key => path_ids}
+      else
+        clause = path_ids.inject([]) do |result, array|
+          result << self.base_class.primary_key.inject([]) do |subresult, key|
+            subresult << "#{self.base_class.table_name}.#{key} = ?"
+            subresult
+          end.join(" AND ")
+          result
+        end.join(" OR ")
+        ([clause] + path_ids.flatten)
+      end
     end
 
     def path depth_options = {}
@@ -179,12 +201,12 @@ module Ancestry
     end
 
     def descendant_ids depth_options = {}
-      descendants(depth_options).all(:select => self.base_class.primary_key).collect(&self.base_class.primary_key.to_sym)
+      descendants(depth_options).all(:select => Array(self.base_class.primary_key).map(&:to_s).join(", ")).collect(&:id)
     end
 
     # Subtree
     def subtree_conditions
-      ["#{self.base_class.table_name}.#{self.base_class.primary_key} = ? or #{self.base_class.table_name}.#{self.base_class.ancestry_column} like ? or #{self.base_class.table_name}.#{self.base_class.ancestry_column} = ?", self.id, "#{child_ancestry}/%", child_ancestry]
+      ["(#{ Array(self.base_class.primary_key).map{ |key| "#{self.base_class.table_name}.#{key} = ?"}.join(" AND ") }) or #{self.base_class.table_name}.#{self.base_class.ancestry_column} like ? or #{self.base_class.table_name}.#{self.base_class.ancestry_column} = ?", *(Array(self.base_class.primary_key).map{ |key| self.send(key) }), "#{child_ancestry}/%", child_ancestry]
     end
 
     def subtree depth_options = {}
@@ -192,7 +214,7 @@ module Ancestry
     end
 
     def subtree_ids depth_options = {}
-      subtree(depth_options).all(:select => self.base_class.primary_key).collect(&self.base_class.primary_key.to_sym)
+      subtree(depth_options).all(:select => Array(self.base_class.primary_key).map(&:to_s).join(", ")).collect(&:id)
     end
 
     # Callback disabling
@@ -210,23 +232,22 @@ module Ancestry
 
     # Workaround to support Rails 2
     def add_error_to_base error
-      if rails_3
-        errors[:base] << error
-      else
-        errors.add_to_base error
-      end
+      errors[:base] << error
     end
 
-    def cast_primary_key(key)
-      if primary_key_type == :string
+    def cast_primary_key(key,index=0)
+      if key.to_s.match(/.+,.+/)
+        key.to_s.split(/,/).map.with_index{ |subkey,index| cast_primary_key(subkey,index) }
+      elsif primary_key_type(index) == :string
         key
       else
         key.to_i
       end
     end
 
-    def primary_key_type
-      @primary_key_type ||= column_for_attribute(self.class.primary_key).type
+    def primary_key_type(index)
+      @primary_key_type ||= {}
+      @primary_key_type[index] ||= column_for_attribute(Array(self.class.primary_key)[index]).type
     end
     
     def unscoped_descendants
