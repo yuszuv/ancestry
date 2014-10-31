@@ -2,12 +2,12 @@ module Ancestry
   module ClassMethods
     # Fetch tree node if necessary
     def to_node object
-      if object.is_a?(self.base_class) then object else find(object) end
-    end 
-    
+      if object.is_a?(self.ancestry_base_class) then object else find(object) end
+    end
+
     # Scope on relative depth options
     def scope_depth depth_options, depth
-      depth_options.inject(self.base_class) do |scope, option|
+      depth_options.inject(self.ancestry_base_class) do |scope, option|
         scope_name, relative_depth = option
         if [:before_depth, :to_depth, :at_depth, :from_depth, :after_depth].include? scope_name
           scope.send scope_name, depth + relative_depth
@@ -19,27 +19,27 @@ module Ancestry
 
     # Orphan strategy writer
     def orphan_strategy= orphan_strategy
-      # Check value of orphan strategy, only rootify, restrict or destroy is allowed
-      if [:rootify, :restrict, :destroy].include? orphan_strategy
+      # Check value of orphan strategy, only rootify, adopt, restrict or destroy is allowed
+      if [:rootify, :adopt, :restrict, :destroy].include? orphan_strategy
         class_variable_set :@@orphan_strategy, orphan_strategy
       else
-        raise Ancestry::AncestryException.new("Invalid orphan strategy, valid ones are :rootify, :restrict and :destroy.")
+        raise Ancestry::AncestryException.new("Invalid orphan strategy, valid ones are :rootify,:adopt, :restrict and :destroy.")
       end
     end
-    
+
     # Arrangement
     def arrange options = {}
       scope =
         if options[:order].nil?
-          self.base_class.ordered_by_ancestry
+          self.ancestry_base_class.ordered_by_ancestry
         else
-          self.base_class.ordered_by_ancestry_and options.delete(:order)
+          self.ancestry_base_class.ordered_by_ancestry_and options.delete(:order)
         end
       # Get all nodes ordered by ancestry and start sorting them into an empty hash
-      arrange_nodes scope.all(options)
+      arrange_nodes scope.where(options)
     end
-    
-    # Arrange array of nodes into a nested hash of the form 
+
+    # Arrange array of nodes into a nested hash of the form
     # {node => children}, where children = {} if the node has no children
     def arrange_nodes(nodes)
       # Get all nodes ordered by ancestry and start sorting them into an empty hash
@@ -55,16 +55,38 @@ module Ancestry
         arranged_nodes
       end
     end
-    
-    # Pseudo-preordered array of nodes.  Children will always follow parents, 
-    # but the ordering of nodes within a rank depends on their order in the 
-    # array that gets passed in
-    def sort_by_ancestry(nodes)
-      arranged = nodes.is_a?(Hash) ? nodes : arrange_nodes(nodes.sort_by{|n| n.ancestry || '0'})
+
+     # Arrangement to nested array
+    def arrange_serializable options={}, nodes=nil
+      nodes = arrange(options) if nodes.nil?
+      nodes.map do |parent, children|
+        parent.serializable_hash.merge 'children' => arrange_serializable(options, children)
+      end
+    end
+
+    # Pseudo-preordered array of nodes.  Children will always follow parents,
+    # for ordering nodes within a rank provide block, eg. Node.sort_by_ancestry(Node.all) {|a, b| a.rank <=> b.rank}.
+    def sort_by_ancestry(nodes, &block)
+      arranged = nodes if nodes.is_a?(Hash)
+
+      unless arranged
+        presorted_nodes = nodes.sort do |a, b|
+          a_cestry, b_cestry = a.ancestry || '0', b.ancestry || '0'
+
+          if block_given? && a_cestry == b_cestry
+            yield a, b
+          else
+            a_cestry <=> b_cestry
+          end
+        end
+
+        arranged = arrange_nodes(presorted_nodes)
+      end
+
       arranged.inject([]) do |sorted_nodes, pair|
         node, children = pair
         sorted_nodes << node
-        sorted_nodes += sort_by_ancestry(children) unless children.blank?
+        sorted_nodes += sort_by_ancestry(children, &block) unless children.blank?
         sorted_nodes
       end
     end
@@ -73,10 +95,10 @@ module Ancestry
     def check_ancestry_integrity! options = {}
       parents = {}
       exceptions = [] if options[:report] == :list
-      
-      self.base_class.send(:with_exclusive_scope) do 
+
+      self.ancestry_base_class.unscoped do
         # For each node ...
-        self.base_class.find_each do |node|
+        self.ancestry_base_class.find_each do |node|
           begin
             # ... check validity of ancestry column
             if !node.valid? and !node.errors[node.class.ancestry_column].blank?
@@ -111,10 +133,10 @@ module Ancestry
     def restore_ancestry_integrity!
       parents = {}
       # Wrap the whole thing in a transaction ...
-      self.base_class.transaction do
-        self.base_class.send(:with_exclusive_scope) do 
+      self.ancestry_base_class.transaction do
+        self.ancestry_base_class.unscoped do
           # For each node ...
-          self.base_class.find_each do |node|
+          self.ancestry_base_class.find_each do |node|
             # ... set its ancestry to nil if invalid
             if !node.valid? and !node.errors[node.class.ancestry_column].blank?
               node.without_ancestry_callbacks do
@@ -129,11 +151,11 @@ module Ancestry
             until parent.nil? || parent == node.id
               parent = parents[parent]
             end
-            parents[node.id] = nil if parent == node.id 
+            parents[node.id] = nil if parent == node.id
           end
-          
+
           # For each node ...
-          self.base_class.find_each do |node|
+          self.ancestry_base_class.find_each do |node|
             # ... rebuild ancestry from parents array
             ancestry, parent = nil, parents[node.id]
             until parent.nil?
@@ -146,11 +168,11 @@ module Ancestry
         end
       end
     end
-    
+
     # Build ancestry from parent id's for migration purposes
     def build_ancestry_from_parent_ids! parent_id = nil, ancestry = nil
-      self.base_class.send(:with_exclusive_scope) do 
-        self.base_class.find_each(:conditions => {:parent_id => parent_id}) do |node|
+      self.ancestry_base_class.unscoped do
+        self.ancestry_base_class.where(:parent_id => parent_id).find_each do |node|
           node.without_ancestry_callbacks do
             node.update_attribute ancestry_column, ancestry
           end
@@ -158,14 +180,16 @@ module Ancestry
         end
       end
     end
-    
+
     # Rebuild depth cache if it got corrupted or if depth caching was just turned on
     def rebuild_depth_cache!
       raise Ancestry::AncestryException.new("Cannot rebuild depth cache for model without depth caching.") unless respond_to? :depth_cache_column
-      
-      self.base_class.send(:with_exclusive_scope) do 
-        self.base_class.find_each do |node|
-          node.update_attribute depth_cache_column, node.depth
+
+      self.ancestry_base_class.transaction do
+        self.ancestry_base_class.unscoped do
+          self.ancestry_base_class.find_each do |node|
+            node.update_attribute depth_cache_column, node.depth
+          end
         end
       end
     end
